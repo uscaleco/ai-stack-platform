@@ -207,8 +207,8 @@ jobs:
         run: |
           LAMBDA_NAME=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.STACK_NAME }} \
-            --query "Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue" \
-            --output text | sed "s/.*function://" | sed "s/:.*$//"")
+            --query 'Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue' \
+            --output text | sed 's/.*function://' | sed 's/:.*$//')
           echo "LAMBDA_FUNCTION_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
 
       - name: Deploy to Lambda
@@ -338,6 +338,9 @@ jobs:
           if [ ! -z "$API_ID" ]; then
             echo "Updating API Gateway integration..."
             
+            # Get AWS Account ID first
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            
             # Update Lambda integration
             aws apigatewayv2 update-integration \
               --api-id $API_ID \
@@ -345,7 +348,7 @@ jobs:
                 --api-id $API_ID \
                 --query 'Items[0].IntegrationId' \
                 --output text) \
-              --integration-uri "arn:aws:lambda:${{ env.AWS_REGION }}:${{ aws sts get-caller-identity --query Account --output text }}:function:${{ env.LAMBDA_FUNCTION_NAME }}"
+              --integration-uri "arn:aws:lambda:${{ env.AWS_REGION }}:${AWS_ACCOUNT_ID}:function:${{ env.LAMBDA_FUNCTION_NAME }}"
             
             # Deploy API
             aws apigatewayv2 create-deployment \
