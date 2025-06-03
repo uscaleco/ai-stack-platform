@@ -207,8 +207,8 @@ jobs:
         run: |
           LAMBDA_NAME=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.STACK_NAME }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue' \
-            --output text | sed 's/.*function://' | sed 's/:.*$//')
+            --query "Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue" \
+            --output text | sed "s/.*function://" | sed "s/:.*$//"")
           echo "LAMBDA_FUNCTION_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
 
       - name: Deploy to Lambda
