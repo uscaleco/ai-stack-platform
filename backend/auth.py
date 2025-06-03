@@ -1,11 +1,12 @@
 # backend/auth.py
-from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from supabase import create_client, Client
+import logging
+from typing import Dict, Optional
+
 import jwt
 from config import config
-from typing import Optional, Dict
-import logging
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 
@@ -184,11 +185,12 @@ def delete_user_data(user_id: str) -> bool:
         return False
 
 
+import asyncio
+import time
+from collections import defaultdict
+
 # Rate limiting decorator
 from functools import wraps
-import asyncio
-from collections import defaultdict
-import time
 
 
 class RateLimiter:

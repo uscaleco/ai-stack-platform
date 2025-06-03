@@ -7,15 +7,16 @@ This file bridges the gap between AWS Lambda and FastAPI
 import json
 import os
 import sys
-from typing import Dict, Any
+from typing import Any, Dict
 
 # Add the current directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from mangum import Mangum
-    from main import app
     import logging
+
+    from main import app
+    from mangum import Mangum
 
     # Configure logging for Lambda
     logger = logging.getLogger()

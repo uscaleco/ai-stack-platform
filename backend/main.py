@@ -1,18 +1,19 @@
 # backend/main.py
-from fastapi import FastAPI, HTTPException, Depends, status
+import logging
+import os
+import subprocess
+import time
+import uuid
+from datetime import datetime
+from typing import Dict, List, Optional
+
+import digitalocean
+import stripe
+from auth import get_current_user, get_current_user_id, rate_limit
+from config import config, db_client
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-import stripe
-import digitalocean
-import os
-import uuid
-import subprocess
-from typing import Dict, List, Optional
-from datetime import datetime
-import time
-from config import config, db_client
-from auth import get_current_user, get_current_user_id, rate_limit
-import logging
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
