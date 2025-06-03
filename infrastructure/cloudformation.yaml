@@ -1,0 +1,503 @@
+# infrastructure/cost-effective-cloudformation.yaml
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AI Stack Platform - Cost-Effective Serverless Infrastructure'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  DomainName:
+    Type: String
+    Description: Domain name (optional, leave empty for API Gateway domain)
+    Default: ''
+
+Conditions:
+  HasDomainName: !Not [!Equals [!Ref DomainName, '']]
+  IsProduction: !Equals [!Ref Environment, production]
+
+Resources:
+  # Aurora Serverless v2 Cluster (Cost: ~$15-30/month)
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub ${AWS::StackName}-cluster
+      Engine: aurora-postgresql
+      EngineMode: provisioned
+      EngineVersion: '15.4'
+      DatabaseName: aistackdb
+      MasterUsername: aistackuser
+      ManageMasterUserPassword: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5  # Minimum: ~$15/month
+        MaxCapacity: 4.0  # Maximum: ~$120/month (only when needed)
+      DeletionProtection: !If [IsProduction, true, false]
+      BackupRetentionPeriod: 7
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-aurora-cluster
+
+  # Aurora Serverless v2 Instance
+  DatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-instance
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref ApplicationSecrets
+        - PolicyName: RDSDataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:*
+                Resource: !GetAtt DatabaseCluster.DBClusterArn
+
+  # Secrets Manager (Cost: ~$0.40/month per secret)
+  ApplicationSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${AWS::StackName}/${Environment}
+      Description: Application secrets for AI Stack Platform
+      GenerateSecretString:
+        SecretStringTemplate: !Sub |
+          {
+            "DATABASE_URL": "postgresql://aistackuser@${DatabaseCluster.Endpoint.Address}:5432/aistackdb"
+          }
+        GenerateStringKey: 'JWT_SECRET'
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+
+  # Backend Lambda Function (Cost: Free tier covers most usage)
+  BackendLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-backend
+      Runtime: python3.11
+      Handler: lambda_handler.handler
+      Code:
+        ZipFile: |
+          import json
+          def handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'headers': {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*',
+                      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+                      'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
+                  },
+                  'body': json.dumps({'message': 'Backend API ready for deployment'})
+              }
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          SECRETS_NAME: !Ref ApplicationSecrets
+          DATABASE_CLUSTER_ARN: !GetAtt DatabaseCluster.DBClusterArn
+          AWS_REGION: !Ref AWS::Region
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      ReservedConcurrencyLimit: 100  # Prevent runaway costs
+
+  # Frontend Lambda Function
+  FrontendLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-frontend
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+              const html = `
+              <!DOCTYPE html>
+              <html>
+              <head>
+                  <title>AI Stack Platform</title>
+                  <meta charset="utf-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                  <style>
+                      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+                             margin: 0; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                             min-height: 100vh; color: white; text-align: center; }
+                      .container { max-width: 600px; margin: 0 auto; }
+                      h1 { font-size: 3em; margin-bottom: 20px; }
+                      p { font-size: 1.2em; opacity: 0.9; }
+                      .status { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; margin: 20px 0; }
+                  </style>
+              </head>
+              <body>
+                  <div class="container">
+                      <h1>🚀 AI Stack Platform</h1>
+                      <p>Your production-ready AI deployment platform</p>
+                      <div class="status">
+                          <h3>✅ Infrastructure Ready</h3>
+                          <p>Ready for frontend deployment via GitHub Actions</p>
+                      </div>
+                  </div>
+              </body>
+              </html>`;
+              
+              return {
+                  statusCode: 200,
+                  headers: {
+                      'Content-Type': 'text/html',
+                      'Cache-Control': 'public, max-age=300'
+                  },
+                  body: html
+              };
+          };
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 256
+
+  # API Gateway REST API (Cost: $3.50/million requests)
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      Description: AI Stack Platform API
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Policy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: execute-api:Invoke
+            Resource: '*'
+
+  # API Gateway Resources
+  ApiGatewayResourceProxy:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: '{proxy+}'
+
+  # Backend API Methods
+  ApiGatewayMethodAny:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiGatewayResourceProxy
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BackendLambda.Arn}/invocations'
+
+  ApiGatewayMethodOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiGatewayResourceProxy
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # Lambda Permissions
+  BackendLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BackendLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub '${ApiGateway}/*/ANY/*'
+
+  FrontendLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FrontendLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub '${ApiGateway}/*/*'
+
+  # API Gateway Deployment
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiGatewayMethodAny
+      - ApiGatewayMethodOptions
+    Properties:
+      RestApiId: !Ref ApiGateway
+      Description: !Sub 'Deployment for ${Environment}'
+
+  # API Gateway Stage
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ApiGateway
+      DeploymentId: !Ref ApiGatewayDeployment
+      StageName: !Ref Environment
+      ThrottleSettings:
+        RateLimit: 1000    # 1000 requests per second
+        BurstLimit: 2000   # 2000 concurrent requests
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: ERROR
+          DataTraceEnabled: false
+          MetricsEnabled: true
+          ThrottlingRateLimit: 100
+          ThrottlingBurstLimit: 200
+
+  # Custom Domain (if provided)
+  ApiGatewayDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Condition: HasDomainName
+    Properties:
+      DomainName: !Sub 'api.${DomainName}'
+      RegionalCertificateArn: !Ref SSLCertificate
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiGatewayBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: HasDomainName
+    DependsOn: ApiGatewayDomainName
+    Properties:
+      DomainName: !Ref ApiGatewayDomainName
+      RestApiId: !Ref ApiGateway
+      Stage: !Ref ApiGatewayStage
+
+  # SSL Certificate (if domain provided)
+  SSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasDomainName
+    Properties:
+      DomainName: !Sub 'api.${DomainName}'
+      ValidationMethod: DNS
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-certificate
+
+  # CloudWatch Log Group for API Gateway
+  ApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub 'API-Gateway-Execution-Logs_${ApiGateway}/${Environment}'
+      RetentionInDays: 14
+
+  # CloudWatch Log Groups for Lambda
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${BackendLambda}'
+      RetentionInDays: 14
+
+  FrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FrontendLambda}'
+      RetentionInDays: 14
+
+  # S3 Bucket for Static Assets (Cost: ~$0.50/month)
+  StaticAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-static-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ['*']
+            AllowedMethods: [GET, HEAD]
+            AllowedHeaders: ['*']
+
+  # S3 Bucket Policy
+  StaticAssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StaticAssetsBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${StaticAssetsBucket}/*'
+
+  # CloudWatch Dashboard (Free)
+  ApplicationDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${BackendLambda}" ],
+                  [ ".", "Errors", ".", "." ],
+                  [ ".", "Invocations", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Backend Lambda Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApiGateway", "Count", "ApiName", "${AWS::StackName}-api" ],
+                  [ ".", "Latency", ".", "." ],
+                  [ ".", "4XXError", ".", "." ],
+                  [ ".", "5XXError", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "API Gateway Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/RDS", "ServerlessDatabaseCapacity", "DBClusterIdentifier", "${DatabaseCluster}" ],
+                  [ ".", "DatabaseConnections", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Aurora Serverless Metrics"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ApiGatewayUrl:
+    Description: API Gateway URL
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub ${AWS::StackName}-API-URL
+
+  CustomDomainUrl:
+    Description: Custom Domain URL (if configured)
+    Condition: HasDomainName
+    Value: !Sub 'https://api.${DomainName}'
+    Export:
+      Name: !Sub ${AWS::StackName}-Custom-Domain-URL
+
+  DatabaseEndpoint:
+    Description: Aurora Serverless Cluster Endpoint
+    Value: !GetAtt DatabaseCluster.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-DB-Endpoint
+
+  DatabaseClusterArn:
+    Description: Aurora Serverless Cluster ARN
+    Value: !GetAtt DatabaseCluster.DBClusterArn
+    Export:
+      Name: !Sub ${AWS::StackName}-DB-Cluster-ARN
+
+  SecretsManagerArn:
+    Description: Secrets Manager Secret ARN
+    Value: !Ref ApplicationSecrets
+    Export:
+      Name: !Sub ${AWS::StackName}-Secrets-ARN
+
+  BackendLambdaArn:
+    Description: Backend Lambda Function ARN
+    Value: !GetAtt BackendLambda.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-Backend-Lambda-ARN
+
+  FrontendLambdaArn:
+    Description: Frontend Lambda Function ARN
+    Value: !GetAtt FrontendLambda.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-Frontend-Lambda-ARN
+
+  StaticAssetsBucket:
+    Description: S3 Bucket for Static Assets
+    Value: !Ref StaticAssetsBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-Static-Assets-Bucket
+
+  EstimatedMonthlyCost:
+    Description: Estimated monthly cost breakdown
+    Value: |
+      Aurora Serverless v2 (0.5 ACU min): ~$15-30/month
+      Lambda (within free tier): $0-10/month  
+      API Gateway (1M requests): ~$3.50/month
+      S3 Storage (10GB): ~$0.50/month
+      Secrets Manager: ~$0.40/month
+      CloudWatch Logs: ~$1/month
+      TOTAL: ~$20-45/month for first 1000 users

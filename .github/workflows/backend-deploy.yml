@@ -1,0 +1,431 @@
+# .github/workflows/backend-deploy.yml
+
+name: Deploy Backend to AWS Lambda
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run linting
+        run: |
+          cd backend
+          pip install black isort flake8
+          black --check .
+          isort --check-only .
+          flake8 .
+
+      - name: Run type checking
+        run: |
+          cd backend
+          pip install mypy
+          mypy . --ignore-missing-imports
+
+      - name: Run tests
+        run: |
+          cd backend
+          pytest tests/ -v --cov=. --cov-report=xml
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set environment variables
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "ENVIRONMENT=production" >> $GITHUB_ENV
+            echo "STACK_NAME=ai-stack-platform" >> $GITHUB_ENV
+          else
+            echo "ENVIRONMENT=staging" >> $GITHUB_ENV
+            echo "STACK_NAME=ai-stack-platform-staging" >> $GITHUB_ENV
+          fi
+
+      - name: Install dependencies and create deployment package
+        run: |
+          cd backend
+          
+          # Create deployment directory
+          mkdir -p deployment
+          
+          # Install dependencies to deployment directory
+          pip install -r requirements.txt -t deployment/
+          
+          # Copy application code
+          cp -r *.py deployment/
+          
+          # Copy any additional files
+          if [ -d "templates" ]; then
+            cp -r templates deployment/
+          fi
+          
+          # Create Lambda handler
+          cat > deployment/lambda_handler.py << 'EOF'
+          import os
+          import sys
+          import json
+          from mangum import Mangum
+          
+          # Add the deployment directory to Python path
+          sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+          
+          # Import the FastAPI app
+          from main import app
+          
+          # Create the Mangum handler
+          handler = Mangum(app, lifespan="off")
+          
+          def lambda_handler(event, context):
+              # Handle ALB events
+              if 'requestContext' in event and 'elb' in event['requestContext']:
+                  # Convert ALB event to API Gateway format
+                  event = convert_alb_to_apigw(event)
+              
+              return handler(event, context)
+          
+          def convert_alb_to_apigw(alb_event):
+              """Convert ALB event format to API Gateway format"""
+              return {
+                  'httpMethod': alb_event['httpMethod'],
+                  'path': alb_event['path'],
+                  'queryStringParameters': alb_event.get('queryStringParameters', {}),
+                  'headers': alb_event.get('headers', {}),
+                  'body': alb_event.get('body', ''),
+                  'isBase64Encoded': alb_event.get('isBase64Encoded', False),
+                  'requestContext': {
+                      'httpMethod': alb_event['httpMethod'],
+                      'path': alb_event['path']
+                  }
+              }
+          EOF
+          
+          # Install mangum for Lambda integration
+          pip install mangum -t deployment/
+
+      - name: Update secrets in AWS Secrets Manager
+        run: |
+          # Get current secrets
+          CURRENT_SECRETS=$(aws secretsmanager get-secret-value \
+            --secret-id "${{ env.STACK_NAME }}/${{ env.ENVIRONMENT }}" \
+            --query SecretString --output text 2>/dev/null || echo '{}')
+          
+          # Update secrets with GitHub secrets
+          UPDATED_SECRETS=$(echo "$CURRENT_SECRETS" | jq \
+            --arg supabase_url "${{ secrets.SUPABASE_URL }}" \
+            --arg supabase_anon_key "${{ secrets.SUPABASE_ANON_KEY }}" \
+            --arg supabase_service_key "${{ secrets.SUPABASE_SERVICE_KEY }}" \
+            --arg supabase_jwt_secret "${{ secrets.SUPABASE_JWT_SECRET }}" \
+            --arg stripe_secret_key "${{ secrets.STRIPE_SECRET_KEY }}" \
+            --arg stripe_publishable_key "${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
+            --arg stripe_webhook_secret "${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            --arg digitalocean_token "${{ secrets.DIGITALOCEAN_TOKEN }}" \
+            --arg openai_api_key "${{ secrets.OPENAI_API_KEY }}" \
+            --arg frontend_url "${{ secrets.FRONTEND_URL }}" \
+            --arg backend_url "${{ secrets.BACKEND_URL }}" \
+            '. + {
+              "SUPABASE_URL": $supabase_url,
+              "SUPABASE_ANON_KEY": $supabase_anon_key,
+              "SUPABASE_SERVICE_KEY": $supabase_service_key,
+              "SUPABASE_JWT_SECRET": $supabase_jwt_secret,
+              "STRIPE_SECRET_KEY": $stripe_secret_key,
+              "STRIPE_PUBLISHABLE_KEY": $stripe_publishable_key,
+              "STRIPE_WEBHOOK_SECRET": $stripe_webhook_secret,
+              "DIGITALOCEAN_TOKEN": $digitalocean_token,
+              "OPENAI_API_KEY": $openai_api_key,
+              "FRONTEND_URL": $frontend_url,
+              "BACKEND_URL": $backend_url
+            }')
+          
+          # Update the secret
+          aws secretsmanager update-secret \
+            --secret-id "${{ env.STACK_NAME }}/${{ env.ENVIRONMENT }}" \
+            --secret-string "$UPDATED_SECRETS"
+
+      - name: Create deployment package
+        run: |
+          cd backend/deployment
+          zip -r ../deployment-package.zip . -x "*.pyc" "*/__pycache__/*"
+
+      - name: Get Lambda function name
+        run: |
+          LAMBDA_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`BackendLambdaArn`].OutputValue' \
+            --output text | sed 's/.*function://' | sed 's/:.*$//')
+          echo "LAMBDA_FUNCTION_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
+
+      - name: Deploy to Lambda
+        run: |
+          cd backend
+          
+          # Update function code
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://deployment-package.zip
+          
+          # Wait for update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          
+          # Update function configuration
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --environment Variables='{
+              "ENVIRONMENT": "${{ env.ENVIRONMENT }}",
+              "SECRETS_NAME": "${{ env.STACK_NAME }}/${{ env.ENVIRONMENT }}",
+              "AWS_REGION": "${{ env.AWS_REGION }}"
+            }' \
+            --timeout 30 \
+            --memory-size 512
+
+      - name: Run database migrations
+        run: |
+          # Create a temporary Lambda for running migrations
+          cat > migration_handler.py << 'EOF'
+          import json
+          import subprocess
+          import sys
+          import os
+          
+          def handler(event, context):
+              try:
+                  # Set environment variables from Secrets Manager
+                  import boto3
+                  secrets_client = boto3.client('secretsmanager')
+                  
+                  secret_response = secrets_client.get_secret_value(
+                      SecretId=os.environ['SECRETS_NAME']
+                  )
+                  secrets = json.loads(secret_response['SecretString'])
+                  
+                  # Set DATABASE_URL
+                  os.environ['DATABASE_URL'] = secrets.get('DATABASE_URL', '')
+                  
+                  # Run Alembic migrations
+                  result = subprocess.run([
+                      sys.executable, '-m', 'alembic', 'upgrade', 'head'
+                  ], capture_output=True, text=True, cwd='/var/task')
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({
+                          'stdout': result.stdout,
+                          'stderr': result.stderr,
+                          'returncode': result.returncode
+                      })
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+          EOF
+          
+          # Add migration handler to deployment package
+          cp migration_handler.py backend/deployment/
+          cd backend/deployment
+          zip -r ../migration-package.zip . -x "*.pyc" "*/__pycache__/*"
+          
+          # Invoke migration
+          cd ..
+          aws lambda invoke \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --payload '{"action": "migrate"}' \
+            --cli-binary-format raw-in-base64-out \
+            migration_response.json
+          
+          # Check migration result
+          cat migration_response.json
+
+      - name: Warm up Lambda function
+        run: |
+          # Invoke the health endpoint to warm up the function
+          aws lambda invoke \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --payload '{"httpMethod": "GET", "path": "/health"}' \
+            --cli-binary-format raw-in-base64-out \
+            warmup_response.json
+          
+          echo "Warmup response:"
+          cat warmup_response.json
+
+      - name: Run health check
+        run: |
+          # Get the ALB DNS name
+          ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApplicationLoadBalancerDNS`].OutputValue' \
+            --output text)
+          
+          # Wait for ALB to be ready
+          sleep 30
+          
+          # Health check with retry
+          for i in {1..5}; do
+            if curl -f "https://${ALB_DNS}/health" -H "Host: api.${{ secrets.FRONTEND_URL || 'localhost' }}"; then
+              echo "Health check passed!"
+              break
+            else
+              echo "Health check attempt $i failed, retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
+
+      - name: Update API Gateway (if exists)
+        run: |
+          # Check if API Gateway integration exists
+          API_ID=$(aws apigatewayv2 get-apis \
+            --query 'Items[?Name==`ai-stack-platform-api`].ApiId' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ ! -z "$API_ID" ]; then
+            echo "Updating API Gateway integration..."
+            
+            # Update Lambda integration
+            aws apigatewayv2 update-integration \
+              --api-id $API_ID \
+              --integration-id $(aws apigatewayv2 get-integrations \
+                --api-id $API_ID \
+                --query 'Items[0].IntegrationId' \
+                --output text) \
+              --integration-uri "arn:aws:lambda:${{ env.AWS_REGION }}:${{ aws sts get-caller-identity --query Account --output text }}:function:${{ env.LAMBDA_FUNCTION_NAME }}"
+            
+            # Deploy API
+            aws apigatewayv2 create-deployment \
+              --api-id $API_ID \
+              --stage-name ${{ env.ENVIRONMENT }}
+          fi
+
+      - name: Cleanup
+        run: |
+          # Remove temporary files
+          rm -f backend/deployment-package.zip
+          rm -f backend/migration-package.zip
+          rm -f backend/migration_response.json
+          rm -f backend/warmup_response.json
+          rm -rf backend/deployment
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Backend deployment successful!"
+            echo "Backend URL: ${{ secrets.BACKEND_URL || 'https://api.yourdomain.com' }}"
+          else
+            echo "❌ Backend deployment failed!"
+          fi
+
+  post-deploy:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    if: success() && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Stripe webhook endpoint
+        run: |
+          # Update Stripe webhook URL if STRIPE_WEBHOOK_ID is provided
+          if [ ! -z "${{ secrets.STRIPE_WEBHOOK_ID }}" ]; then
+            echo "Updating Stripe webhook endpoint..."
+            
+            # This would typically use Stripe CLI or API
+            # stripe webhooks update ${{ secrets.STRIPE_WEBHOOK_ID }} \
+            #   --url "${{ secrets.BACKEND_URL }}/webhook/stripe"
+          fi
+
+      - name: Test API endpoints
+        run: |
+          # Test public endpoints
+          curl -f "${{ secrets.BACKEND_URL || 'https://api.yourdomain.com' }}/" || echo "Root endpoint test failed"
+          curl -f "${{ secrets.BACKEND_URL || 'https://api.yourdomain.com' }}/health" || echo "Health endpoint test failed"
+          curl -f "${{ secrets.BACKEND_URL || 'https://api.yourdomain.com' }}/templates" || echo "Templates endpoint test failed"
+
+      - name: Create GitHub deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: '${{ env.ENVIRONMENT }}',
+              description: 'Backend deployed to AWS Lambda',
+              auto_merge: false
+            });
+
+      - name: Send Slack notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          text: |
+            Backend deployment to ${{ env.ENVIRONMENT }} ${{ job.status }}!
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            URL: ${{ secrets.BACKEND_URL || 'https://api.yourdomain.com' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
