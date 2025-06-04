@@ -7,11 +7,12 @@ from typing import Dict, Optional
 
 import digitalocean
 import stripe
-from auth import get_current_user, rate_limit
-from config import config, db_client
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from auth import get_current_user, rate_limit
+from config import config, db_client
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -96,10 +97,17 @@ TEMPLATES = {
         "compose_file": "ollama-webui-stack.yml",
         "port": 3000,
         "pricing": {
-            "basic": {"price": 2000, "features": ["Manual updates", "Basic support"]},
+            "basic": {
+                "price": 2000,
+                "features": ["Manual updates", "Basic support"],
+            },
             "pro": {
                 "price": 5000,
-                "features": ["Auto-updates", "Zero downtime", "Priority support"],
+                "features": [
+                    "Auto-updates",
+                    "Zero downtime",
+                    "Priority support",
+                ],
             },
             "enterprise": {
                 "price": 15000,
@@ -120,10 +128,17 @@ TEMPLATES = {
         "compose_file": "rag-stack.yml",
         "port": 8501,
         "pricing": {
-            "basic": {"price": 3000, "features": ["Manual updates", "Basic support"]},
+            "basic": {
+                "price": 3000,
+                "features": ["Manual updates", "Basic support"],
+            },
             "pro": {
                 "price": 7500,
-                "features": ["Auto-updates", "Zero downtime", "Priority support"],
+                "features": [
+                    "Auto-updates",
+                    "Zero downtime",
+                    "Priority support",
+                ],
             },
             "enterprise": {
                 "price": 20000,
@@ -144,10 +159,17 @@ TEMPLATES = {
         "compose_file": "agent-stack.yml",
         "port": 8000,
         "pricing": {
-            "basic": {"price": 5000, "features": ["Manual updates", "Basic support"]},
+            "basic": {
+                "price": 5000,
+                "features": ["Manual updates", "Basic support"],
+            },
             "pro": {
                 "price": 12500,
-                "features": ["Auto-updates", "Zero downtime", "Priority support"],
+                "features": [
+                    "Auto-updates",
+                    "Zero downtime",
+                    "Priority support",
+                ],
             },
             "enterprise": {
                 "price": 30000,
@@ -222,12 +244,13 @@ async def get_user_profile(
     try:
         # Get subscription count
         subscription_sql = """
-            SELECT COUNT(*) as count 
-            FROM subscriptions 
+            SELECT COUNT(*) as count
+            FROM subscriptions
             WHERE user_id = ? AND status = 'active'
         """
         subscription_result = await execute_query(
-            subscription_sql, [{"name": "user_id", "value": {"stringValue": user_id}}]
+            subscription_sql,
+            [{"name": "user_id", "value": {"stringValue": user_id}}],
         )
         subscription_count = (
             subscription_result.get("records", [{}])[0].get("count", 0)
@@ -237,12 +260,13 @@ async def get_user_profile(
 
         # Get deployment count
         deployment_sql = """
-            SELECT COUNT(*) as count 
-            FROM deployments 
+            SELECT COUNT(*) as count
+            FROM deployments
             WHERE user_id = ?
         """
         deployment_result = await execute_query(
-            deployment_sql, [{"name": "user_id", "value": {"stringValue": user_id}}]
+            deployment_sql,
+            [{"name": "user_id", "value": {"stringValue": user_id}}],
         )
         deployment_count = (
             deployment_result.get("records", [{}])[0].get("count", 0)
@@ -258,13 +282,16 @@ async def get_user_profile(
         )
     except Exception as e:
         logger.error(f"Error getting user profile: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error retrieving user profile")
+        raise HTTPException(
+            status_code=500, detail="Error retrieving user profile"
+        )
 
 
 @app.post("/create-subscription")
 @rate_limit(max_requests=10, window_seconds=3600)
 async def create_subscription(
-    request: SubscriptionRequest, current_user: dict = Depends(get_current_user)
+    request: SubscriptionRequest,
+    current_user: dict = Depends(get_current_user),
 ):
     """Create a Stripe subscription for a deployment (protected)"""
     try:
@@ -276,7 +303,11 @@ async def create_subscription(
             raise HTTPException(status_code=400, detail="Invalid template")
 
         # Extract pricing tier
-        tier = request.plan_type.split("-")[-1] if "-" in request.plan_type else "basic"
+        tier = (
+            request.plan_type.split("-")[-1]
+            if "-" in request.plan_type
+            else "basic"
+        )
         pricing = template["pricing"].get(tier, template["pricing"]["basic"])
 
         # Create Stripe customer
@@ -372,20 +403,25 @@ async def deploy_stack(
 
         # Verify subscription exists and is active for this user
         subscription_sql = """
-            SELECT id, stripe_subscription_id 
-            FROM subscriptions 
+            SELECT id, stripe_subscription_id
+            FROM subscriptions
             WHERE user_id = ? AND plan_type LIKE ? AND status = 'active'
         """
         subscription_result = await execute_query(
             subscription_sql,
             [
                 {"name": "user_id", "value": {"stringValue": user_id}},
-                {"name": "plan_type", "value": {"stringValue": f"{template_name}%"}},
+                {
+                    "name": "plan_type",
+                    "value": {"stringValue": f"{template_name}%"},
+                },
             ],
         )
 
         if not subscription_result.get("records"):
-            raise HTTPException(status_code=400, detail="No active subscription found")
+            raise HTTPException(
+                status_code=400, detail="No active subscription found"
+            )
 
         subscription_record = subscription_result["records"][0]
         subscription_id = subscription_record.get("id", {}).get("stringValue")
@@ -419,7 +455,11 @@ async def deploy_stack(
             backups=False,
             ipv6=True,
             user_data=generate_cloud_init_script(template),
-            tags=[f"ai-deploy-{template_name}", f"user-{user_id}", f"tier-{tier}"],
+            tags=[
+                f"ai-deploy-{template_name}",
+                f"user-{user_id}",
+                f"tier-{tier}",
+            ],
         )
 
         droplet.create()
@@ -442,7 +482,10 @@ async def deploy_stack(
             {"name": "id", "value": {"stringValue": deployment_id}},
             {"name": "user_id", "value": {"stringValue": user_id}},
             {"name": "user_email", "value": {"stringValue": user_email}},
-            {"name": "template_id", "value": {"stringValue": request.template_id}},
+            {
+                "name": "template_id",
+                "value": {"stringValue": request.template_id},
+            },
             {"name": "droplet_id", "value": {"stringValue": str(droplet.id)}},
             {"name": "url", "value": {"stringValue": access_url}},
             {"name": "status", "value": {"stringValue": "deploying"}},
@@ -450,12 +493,18 @@ async def deploy_stack(
                 "name": "created_at",
                 "value": {"stringValue": datetime.now().isoformat()},
             },
-            {"name": "subscription_id", "value": {"stringValue": subscription_id}},
+            {
+                "name": "subscription_id",
+                "value": {"stringValue": subscription_id},
+            },
             {
                 "name": "auto_update_enabled",
                 "value": {"booleanValue": auto_update_enabled},
             },
-            {"name": "update_schedule", "value": {"stringValue": update_schedule}},
+            {
+                "name": "update_schedule",
+                "value": {"stringValue": update_schedule},
+            },
         ]
 
         await execute_query(deployment_sql, deployment_parameters)
@@ -469,7 +518,11 @@ async def deploy_stack(
 
     except Exception as e:
         logger.error(f"Deployment error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Deployment failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Deployment failed: {
+                str(e)}",
+        )
 
 
 @app.get("/deployments")
@@ -480,13 +533,14 @@ async def get_user_deployments(current_user: dict = Depends(get_current_user)):
 
     try:
         deployments_sql = """
-            SELECT id, template_id, url, status, created_at, auto_update_enabled, update_schedule 
-            FROM deployments 
+            SELECT id, template_id, url, status, created_at, auto_update_enabled, update_schedule
+            FROM deployments
             WHERE user_id = ?
             ORDER BY created_at DESC
         """
         result = await execute_query(
-            deployments_sql, [{"name": "user_id", "value": {"stringValue": user_id}}]
+            deployments_sql,
+            [{"name": "user_id", "value": {"stringValue": user_id}}],
         )
 
         deployments = []
@@ -494,13 +548,17 @@ async def get_user_deployments(current_user: dict = Depends(get_current_user)):
             deployments.append(
                 {
                     "id": record.get("id", {}).get("stringValue"),
-                    "template_id": record.get("template_id", {}).get("stringValue"),
+                    "template_id": record.get("template_id", {}).get(
+                        "stringValue"
+                    ),
                     "url": record.get("url", {}).get("stringValue"),
                     "status": record.get("status", {}).get("stringValue"),
-                    "created_at": record.get("created_at", {}).get("stringValue"),
-                    "auto_update_enabled": record.get("auto_update_enabled", {}).get(
-                        "booleanValue"
+                    "created_at": record.get("created_at", {}).get(
+                        "stringValue"
                     ),
+                    "auto_update_enabled": record.get(
+                        "auto_update_enabled", {}
+                    ).get("booleanValue"),
                     "update_schedule": record.get("update_schedule", {}).get(
                         "stringValue"
                     ),
@@ -510,7 +568,9 @@ async def get_user_deployments(current_user: dict = Depends(get_current_user)):
         return {"deployments": deployments}
     except Exception as e:
         logger.error(f"Error getting deployments: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error retrieving deployments")
+        raise HTTPException(
+            status_code=500, detail="Error retrieving deployments"
+        )
 
 
 @app.delete("/deployments/{deployment_id}")
@@ -524,8 +584,8 @@ async def delete_deployment(
 
         # Get deployment info (user-scoped)
         deployment_sql = """
-            SELECT droplet_id, subscription_id 
-            FROM deployments 
+            SELECT droplet_id, subscription_id
+            FROM deployments
             WHERE id = ? AND user_id = ?
         """
         result = await execute_query(
@@ -552,8 +612,8 @@ async def delete_deployment(
         # Cancel Stripe subscription
         if subscription_id:
             subscription_sql = """
-                SELECT stripe_subscription_id 
-                FROM subscriptions 
+                SELECT stripe_subscription_id
+                FROM subscriptions
                 WHERE id = ? AND user_id = ?
             """
             sub_result = await execute_query(
@@ -575,21 +635,27 @@ async def delete_deployment(
 
                     # Update subscription status
                     update_sql = """
-                        UPDATE subscriptions 
-                        SET status = 'canceled' 
+                        UPDATE subscriptions
+                        SET status = 'canceled'
                         WHERE id = ? AND user_id = ?
                     """
                     await execute_query(
                         update_sql,
                         [
-                            {"name": "id", "value": {"stringValue": subscription_id}},
-                            {"name": "user_id", "value": {"stringValue": user_id}},
+                            {
+                                "name": "id",
+                                "value": {"stringValue": subscription_id},
+                            },
+                            {
+                                "name": "user_id",
+                                "value": {"stringValue": user_id},
+                            },
                         ],
                     )
 
         # Delete from database
         delete_sql = """
-            DELETE FROM deployments 
+            DELETE FROM deployments
             WHERE id = ? AND user_id = ?
         """
         await execute_query(
@@ -682,7 +748,7 @@ services:
     restart: unless-stopped
     environment:
       - OLLAMA_HOST=0.0.0.0
-  
+
   webui:
     image: ghcr.io/open-webui/open-webui:main
     ports:
@@ -706,7 +772,7 @@ services:
     volumes:
       - chroma:/chroma/chroma
     restart: unless-stopped
-  
+
   rag-app:
     image: python:3.11-slim
     ports:
@@ -734,7 +800,7 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-  
+
   agent:
     image: python:3.11-slim
     ports:

@@ -125,7 +125,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if "requestContext" in event:
             # API Gateway event
             if "elb" in event.get("requestContext", {}):
-                # Application Load Balancer event - convert to API Gateway format
+                # Application Load Balancer event - convert to API Gateway
+                # format
                 converted_event = convert_alb_to_apigw(event)
                 response = handler(converted_event, context)
                 return convert_apigw_to_alb(response)
@@ -147,7 +148,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "Access-Control-Allow-Origin": "*",
                 },
                 "body": json.dumps(
-                    {"error": "Unsupported event type", "event_type": str(type(event))}
+                    {
+                        "error": "Unsupported event type",
+                        "event_type": str(type(event)),
+                    }
                 ),
             }
 
@@ -162,7 +166,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "body": json.dumps(
                 {
                     "error": "Internal server error",
-                    "message": str(e) if os.getenv("DEBUG") else "An error occurred",
+                    "message": (
+                        str(e) if os.getenv("DEBUG") else "An error occurred"
+                    ),
                 }
             ),
         }
