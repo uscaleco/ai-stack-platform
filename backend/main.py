@@ -400,9 +400,7 @@ async def deploy_stack(
         update_schedule = (
             "monthly"
             if tier == "pro"
-            else "immediate"
-            if tier == "enterprise"
-            else "manual"
+            else "immediate" if tier == "enterprise" else "manual"
         )
 
         # Create DigitalOcean droplet

@@ -1,4 +1,3 @@
-
 import json
 import logging
 import os
@@ -63,7 +62,9 @@ def convert_alb_to_apigw(alb_event: Dict[str, Any]) -> Dict[str, Any]:
             "stage": "prod",
             "requestId": "lambda-request",
             "identity": {
-                "sourceIp": alb_event.get("headers", {}).get("x-forwarded-for", "127.0.0.1")
+                "sourceIp": alb_event.get("headers", {}).get(
+                    "x-forwarded-for", "127.0.0.1"
+                )
             },
         },
     }
