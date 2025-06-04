@@ -32,7 +32,7 @@ try:
 except ImportError as e:
     logger.error(f"Import error: {e}")
 
-    def handler(event, context):
+    def handler(event, context, e):
         return {
             "statusCode": 500,
             "body": json.dumps({"error": "Import error", "message": str(e)}),
