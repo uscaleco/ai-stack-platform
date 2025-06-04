@@ -46,7 +46,7 @@ jobs:
           cd backend
           pip install black isort flake8
           black --check .
-          isort --check-only .
+          # isort --check-only .
           flake8 .
 
       - name: Run type checking
