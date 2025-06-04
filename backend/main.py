@@ -520,9 +520,7 @@ async def deploy_stack(
         logger.error(f"Deployment error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Deployment failed: {
-                str(e)}",
-        )
+            detail=f"Deployment failed: {str(e)}",)
 
 
 @app.get("/deployments")
