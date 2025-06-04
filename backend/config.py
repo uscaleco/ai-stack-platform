@@ -3,7 +3,6 @@ import json
 import logging
 import os
 from functools import lru_cache
-from typing import Optional
 
 import boto3
 from dotenv import load_dotenv

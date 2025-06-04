@@ -185,7 +185,6 @@ def delete_user_data(user_id: str) -> bool:
         return False
 
 
-import asyncio
 import time
 from collections import defaultdict
 

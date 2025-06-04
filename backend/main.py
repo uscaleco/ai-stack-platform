@@ -1,19 +1,17 @@
 # backend/main.py
 import logging
-import os
-import subprocess
 import time
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import digitalocean
 import stripe
-from auth import get_current_user, get_current_user_id, rate_limit
+from auth import get_current_user, rate_limit
 from config import config, db_client
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -402,7 +400,9 @@ async def deploy_stack(
         update_schedule = (
             "monthly"
             if tier == "pro"
-            else "immediate" if tier == "enterprise" else "manual"
+            else "immediate"
+            if tier == "enterprise"
+            else "manual"
         )
 
         # Create DigitalOcean droplet
