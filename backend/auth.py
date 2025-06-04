@@ -1,25 +1,19 @@
 # backend/auth.py
 import logging
-import time
-from collections import defaultdict
-from functools import wraps
 from typing import Dict, Optional
 
 import jwt
+from config import config
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from supabase import Client, create_client
-
-from config import config
 
 logger = logging.getLogger(__name__)
 
 # Initialize Supabase client
 
 
-supabase: Client = create_client(
-    config.supabase_url, config.supabase_service_key
-)
+supabase: Client = create_client(config.supabase_url, config.supabase_service_key)
 
 # Security scheme
 security = HTTPBearer()
@@ -111,7 +105,7 @@ def get_current_user_optional(
         token = credentials.credentials
         user_info = verify_jwt_token(token)
         return user_info
-    except Exception:
+    except Exception as e:
         return None
 
 
@@ -119,8 +113,7 @@ def require_admin(current_user: Dict = Depends(get_current_user)) -> Dict:
     """FastAPI dependency to require admin role"""
     if current_user.get("role") != "admin":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
     return current_user
 
@@ -166,9 +159,7 @@ def create_user_profile(
 def update_user_profile(user_id: str, updates: Dict) -> bool:
     """Update user profile in database"""
     try:
-        supabase.table("user_profiles").update(updates).eq(
-            "id", user_id
-        ).execute()
+        supabase.table("user_profiles").update(updates).eq("id", user_id).execute()
         return True
     except Exception as e:
         logger.error(f"Error updating user profile: {str(e)}")
@@ -185,9 +176,7 @@ def delete_user_data(user_id: str) -> bool:
         ).execute()
 
         supabase.table("deployments").delete().eq("user_id", user_id).execute()
-        supabase.table("subscriptions").delete().eq(
-            "user_id", user_id
-        ).execute()
+        supabase.table("subscriptions").delete().eq("user_id", user_id).execute()
         supabase.table("user_profiles").delete().eq("id", user_id).execute()
 
         return True
@@ -196,7 +185,11 @@ def delete_user_data(user_id: str) -> bool:
         return False
 
 
+import time
+from collections import defaultdict
+
 # Rate limiting decorator
+from functools import wraps
 
 
 class RateLimiter:
@@ -212,9 +205,7 @@ class RateLimiter:
 
         # Clean old requests
         self.requests[user_id] = [
-            req_time
-            for req_time in self.requests[user_id]
-            if req_time > window_start
+            req_time for req_time in self.requests[user_id] if req_time > window_start
         ]
 
         # Check if under limit
