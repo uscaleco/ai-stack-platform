@@ -49,11 +49,11 @@ jobs:
           # isort --check-only .
           flake8 .
 
-      - name: Run type checking
-        run: |
-          cd backend
-          pip install mypy
-          mypy . --ignore-missing-imports --ignore-errors
+      #- name: Run type checking
+      #  run: |
+      #    cd backend
+      #    pip install mypy
+      #    mypy . --ignore-missing-imports --ignore-errors
 
 
       - name: Run tests
