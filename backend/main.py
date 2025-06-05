@@ -282,9 +282,7 @@ async def get_user_profile(
         )
     except Exception as e:
         logger.error(f"Error getting user profile: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error retrieving user profile"
-        )
+        raise HTTPException(status_code=500, detail="Error retrieving user profile")
 
 
 @app.post("/create-subscription")
@@ -294,6 +292,7 @@ async def create_subscription(
     current_user: dict = Depends(get_current_user),
 ):
     """Create a Stripe subscription for a deployment (protected)"""
+    print(get_current_user.__name__)
     try:
         user_id = current_user["user_id"]
         user_email = current_user["email"]
@@ -303,11 +302,7 @@ async def create_subscription(
             raise HTTPException(status_code=400, detail="Invalid template")
 
         # Extract pricing tier
-        tier = (
-            request.plan_type.split("-")[-1]
-            if "-" in request.plan_type
-            else "basic"
-        )
+        tier = request.plan_type.split("-")[-1] if "-" in request.plan_type else "basic"
         pricing = template["pricing"].get(tier, template["pricing"]["basic"])
 
         # Create Stripe customer
@@ -419,9 +414,7 @@ async def deploy_stack(
         )
 
         if not subscription_result.get("records"):
-            raise HTTPException(
-                status_code=400, detail="No active subscription found"
-            )
+            raise HTTPException(status_code=400, detail="No active subscription found")
 
         subscription_record = subscription_result["records"][0]
         subscription_id = subscription_record.get("id", {}).get("stringValue")
@@ -520,7 +513,8 @@ async def deploy_stack(
         logger.error(f"Deployment error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Deployment failed: {str(e)}",)
+            detail=f"Deployment failed: {str(e)}",
+        )
 
 
 @app.get("/deployments")
@@ -546,17 +540,13 @@ async def get_user_deployments(current_user: dict = Depends(get_current_user)):
             deployments.append(
                 {
                     "id": record.get("id", {}).get("stringValue"),
-                    "template_id": record.get("template_id", {}).get(
-                        "stringValue"
-                    ),
+                    "template_id": record.get("template_id", {}).get("stringValue"),
                     "url": record.get("url", {}).get("stringValue"),
                     "status": record.get("status", {}).get("stringValue"),
-                    "created_at": record.get("created_at", {}).get(
-                        "stringValue"
+                    "created_at": record.get("created_at", {}).get("stringValue"),
+                    "auto_update_enabled": record.get("auto_update_enabled", {}).get(
+                        "booleanValue"
                     ),
-                    "auto_update_enabled": record.get(
-                        "auto_update_enabled", {}
-                    ).get("booleanValue"),
                     "update_schedule": record.get("update_schedule", {}).get(
                         "stringValue"
                     ),
@@ -566,9 +556,7 @@ async def get_user_deployments(current_user: dict = Depends(get_current_user)):
         return {"deployments": deployments}
     except Exception as e:
         logger.error(f"Error getting deployments: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Error retrieving deployments"
-        )
+        raise HTTPException(status_code=500, detail="Error retrieving deployments")
 
 
 @app.delete("/deployments/{deployment_id}")

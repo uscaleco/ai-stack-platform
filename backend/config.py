@@ -66,9 +66,7 @@ class Config:
             self.openai_api_key = secrets.get("OPENAI_API_KEY")
 
             # Application settings
-            self.frontend_url = secrets.get(
-                "FRONTEND_URL", "https://yourdomain.com"
-            )
+            self.frontend_url = secrets.get("FRONTEND_URL", "https://yourdomain.com")
             self.api_gateway_url = secrets.get("API_GATEWAY_URL")
             self.allowed_origins = secrets.get(
                 "ALLOWED_ORIGINS", self.frontend_url
@@ -112,12 +110,10 @@ class Config:
 
         # Application settings
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        self.api_gateway_url = os.getenv(
-            "API_GATEWAY_URL", "http://localhost:8000"
+        self.api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8000")
+        self.allowed_origins = os.getenv("ALLOWED_ORIGINS", self.frontend_url).split(
+            ","
         )
-        self.allowed_origins = os.getenv(
-            "ALLOWED_ORIGINS", self.frontend_url
-        ).split(",")
 
         logger.info("Configuration loaded from environment variables")
 

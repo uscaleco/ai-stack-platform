@@ -166,9 +166,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "body": json.dumps(
                 {
                     "error": "Internal server error",
-                    "message": (
-                        str(e) if os.getenv("DEBUG") else "An error occurred"
-                    ),
+                    "message": (str(e) if os.getenv("DEBUG") else "An error occurred"),
                 }
             ),
         }
