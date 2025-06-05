@@ -61,7 +61,7 @@ jobs:
           NEXT_PUBLIC_API_URL: ${{ secrets.BACKEND_URL }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3.1.3
+        uses: actions/download-artifact@v4
 
         with:
           name: frontend-build
