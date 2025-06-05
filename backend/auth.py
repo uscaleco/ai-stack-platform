@@ -105,7 +105,7 @@ def get_current_user_optional(
         token = credentials.credentials
         user_info = verify_jwt_token(token)
         return user_info
-    except Exception as e:
+    except Exception:
         return None
 
 
