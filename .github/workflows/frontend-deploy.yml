@@ -55,10 +55,10 @@ jobs:
           cd frontend
           npm run build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
-          NEXT_PUBLIC_API_URL: ${{ secrets.BACKEND_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: "TEST"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "TEST"
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "TEST"
+          NEXT_PUBLIC_API_URL: "BACKEND_URL_TEST"
 
       - name: Upload build artifacts
         uses: actions/download-artifact@v4
