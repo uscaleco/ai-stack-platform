@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: ai-stack-platform-backend
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: SUPABASE_URL
+        fromSecret: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromSecret: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_KEY
+        fromSecret: SUPABASE_SERVICE_KEY
+      - key: SUPABASE_JWT_SECRET
+        fromSecret: SUPABASE_JWT_SECRET
+      - key: STRIPE_SECRET_KEY
+        fromSecret: STRIPE_SECRET_KEY
+      - key: STRIPE_PUBLISHABLE_KEY
+        fromSecret: STRIPE_PUBLISHABLE_KEY
+      - key: STRIPE_WEBHOOK_SECRET
+        fromSecret: STRIPE_WEBHOOK_SECRET
+      - key: DIGITALOCEAN_TOKEN
+        fromSecret: DIGITALOCEAN_TOKEN
+      - key: OPENAI_API_KEY
+        fromSecret: OPENAI_API_KEY

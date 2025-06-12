@@ -1,467 +1,117 @@
 # .github/workflows/frontend-deploy.yml
 
-name: Deploy Frontend to AWS Lambda
+name: Deploy Frontend to Vercel
 
 on:
-  push:
-    branches: [main, staging]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/frontend-deploy.yml'
-  workflow_dispatch:
+ push:
+   branches: [main, staging]
+   paths:
+     - 'frontend/**'
+     - '.github/workflows/frontend-deploy.yml'
+ workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
-  NODE_VERSION: '18'
+ NODE_VERSION: '18'
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+ test:
+   runs-on: ubuntu-latest
+   steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+     - name: Set up Node.js
+       uses: actions/setup-node@v4
+       with:
+         node-version: ${{ env.NODE_VERSION }}
+         cache: 'npm'
+         cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
+     - name: Install dependencies
+       run: |
+         cd frontend
+         npm ci
 
-      - name: Run linting
-        run: |
-          cd frontend
-          next lint || echo 'Skipping ESLint in CI if config missing'
+     - name: Run linting
+       run: |
+         cd frontend
+         npm run lint
 
-      - name: Run type checking
-        run: |
-          cd frontend
-          npm run type-check
+     - name: Run type checking
+       run: |
+         cd frontend
+         npm run type-check
 
-      - name: Run tests
-        run: |
-          cd frontend
-          npm run test
-        env:
-          CI: true
+     - name: Run tests
+       run: |
+         cd frontend
+         npm run test
 
-      - name: Build application
-        run: |
-          cd frontend
-          npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: "TEST"
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: "TEST"
-          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "TEST"
-          NEXT_PUBLIC_API_URL: "BACKEND_URL_TEST"
+ deploy:
+   needs: test
+   runs-on: ubuntu-latest
+   environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+   
+   steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
 
-      - name: Upload build artifacts
-        uses: actions/download-artifact@v4
+     - name: Set up Node.js
+       uses: actions/setup-node@v4
+       with:
+         node-version: ${{ env.NODE_VERSION }}
+         cache: 'npm'
+         cache-dependency-path: frontend/package-lock.json
 
-        with:
-          name: frontend-build
-          path: frontend/.next/
-          retention-days: 1
+     - name: Install dependencies
+       run: |
+         cd frontend
+         npm ci
 
-  build-and-deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+     - name: Build project
+       run: |
+         cd frontend
+         npm run build
+       env:
+         NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+         NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+         NEXT_PUBLIC_API_URL: ${{ secrets.BACKEND_URL }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+     - name: Deploy to Vercel
+       uses: amondnet/vercel-action@v25
+       with:
+         vercel-token: ${{ secrets.VERCEL_TOKEN }}
+         vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+         working-directory: ./frontend
+         vercel-args: '--prod'
+       env:
+         NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+         NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+         NEXT_PUBLIC_API_URL: ${{ secrets.BACKEND_URL }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+ post-deploy:
+   needs: deploy
+   runs-on: ubuntu-latest
+   if: success() && github.ref == 'refs/heads/main'
+   
+   steps:
+     - name: Deployment summary
+       run: |
+         echo "🎉 Frontend deployed to Vercel successfully!"
+         echo "Check your Vercel dashboard for the live URL"
 
-      - name: Set environment variables
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "ENVIRONMENT=production" >> $GITHUB_ENV
-            echo "STACK_NAME=ai-stack-platform" >> $GITHUB_ENV
-          else
-            echo "ENVIRONMENT=staging" >> $GITHUB_ENV
-            echo "STACK_NAME=ai-stack-platform-staging" >> $GITHUB_ENV
-          fi
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: frontend-build
-          path: frontend/.next/
-
-      - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
-
-      - name: Build for production
-        run: |
-          cd frontend
-          npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
-          NEXT_PUBLIC_API_URL: ${{ secrets.BACKEND_URL }}
-          NEXT_PUBLIC_GA_ID: ${{ secrets.GA_ID }}
-
-      - name: Create Lambda deployment package
-        run: |
-          cd frontend
-          
-          # Create deployment directory
-          mkdir -p deployment
-          
-          # Copy Next.js standalone build
-          cp -r .next/standalone/* deployment/
-          cp -r .next/static deployment/.next/static/
-          cp -r public deployment/public/
-          
-          # Install serverless adapter
-          npm install @serverless-nextjs/lambda@legacy
-          
-          # Create Lambda handler
-          cat > deployment/index.js << 'EOF'
-          const { compatibilityMiddleware } = require('@serverless-nextjs/lambda');
-          
-          // Import Next.js server
-          const server = require('./server.js');
-          
-          // Wrap with compatibility middleware for ALB
-          const handler = compatibilityMiddleware(server);
-          
-          exports.handler = async (event, context) => {
-            // Handle ALB events
-            if (event.requestContext && event.requestContext.elb) {
-              // Convert ALB event to API Gateway format
-              const convertedEvent = {
-                httpMethod: event.httpMethod,
-                path: event.path,
-                queryStringParameters: event.queryStringParameters || {},
-                headers: event.headers || {},
-                body: event.body || '',
-                isBase64Encoded: event.isBase64Encoded || false,
-                requestContext: {
-                  httpMethod: event.httpMethod,
-                  path: event.path,
-                  stage: 'prod'
-                }
-              };
-              
-              const response = await handler(convertedEvent, context);
-              
-              // Convert response back to ALB format
-              return {
-                statusCode: response.statusCode,
-                statusDescription: response.statusCode + ' ' + (response.statusCode === 200 ? 'OK' : 'Error'),
-                headers: response.headers || {},
-                body: response.body,
-                isBase64Encoded: response.isBase64Encoded || false
-              };
-            }
-            
-            // Handle API Gateway events directly
-            return handler(event, context);
-          };
-          EOF
-          
-          # Install required dependencies
-          cd deployment
-          npm init -y
-          npm install next react react-dom
-          npm install --save-dev @types/aws-lambda
-
-      - name: Optimize deployment package
-        run: |
-          cd frontend/deployment
-          
-          # Remove unnecessary files to reduce package size
-          find . -name "*.map" -delete
-          find . -name "*.md" -delete
-          find . -name "test*" -type d -exec rm -rf {} + 2>/dev/null || true
-          find . -name "__tests__" -type d -exec rm -rf {} + 2>/dev/null || true
-          find . -name "*.test.*" -delete
-          find . -name "*.spec.*" -delete
-          
-          # Remove dev dependencies from node_modules
-          if [ -d "node_modules" ]; then
-            cd node_modules
-            # Keep only production dependencies
-            find . -name "*.d.ts" -delete
-            find . -name "*.md" -delete
-            find . -name "test*" -type d -exec rm -rf {} + 2>/dev/null || true
-            cd ..
-          fi
-
-      - name: Create deployment ZIP
-        run: |
-          cd frontend/deployment
-          zip -r ../deployment-package.zip . -x "*.git*" "*node_modules/.cache/*" "*.DS_Store*"
-
-      - name: Get Lambda function name
-        run: |
-          LAMBDA_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`FrontendLambdaArn`].OutputValue' \
-            --output text | sed 's/.*function://' | sed 's/:.*$//')
-          echo "LAMBDA_FUNCTION_NAME=$LAMBDA_NAME" >> $GITHUB_ENV
-
-      - name: Deploy to Lambda
-        run: |
-          cd frontend
-          
-          # Check package size
-          PACKAGE_SIZE=$(stat -f%z deployment-package.zip 2>/dev/null || stat -c%s deployment-package.zip)
-          echo "Package size: $PACKAGE_SIZE bytes"
-          
-          # AWS Lambda has a 50MB limit for direct upload
-          if [ $PACKAGE_SIZE -gt 52428800 ]; then
-            echo "Package too large for direct upload, using S3..."
-            
-            # Upload to S3
-            BUCKET_NAME="${{ env.STACK_NAME }}-deployment-${{ github.run_id }}"
-            aws s3 mb s3://$BUCKET_NAME --region ${{ env.AWS_REGION }}
-            aws s3 cp deployment-package.zip s3://$BUCKET_NAME/frontend-deployment.zip
-            
-            # Update function code from S3
-            aws lambda update-function-code \
-              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-              --s3-bucket $BUCKET_NAME \
-              --s3-key frontend-deployment.zip
-            
-            # Clean up S3 bucket
-            aws s3 rm s3://$BUCKET_NAME/frontend-deployment.zip
-            aws s3 rb s3://$BUCKET_NAME
-          else
-            # Direct upload
-            aws lambda update-function-code \
-              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-              --zip-file fileb://deployment-package.zip
-          fi
-          
-          # Wait for update to complete
-          aws lambda wait function-updated \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
-
-      - name: Update Lambda configuration
-        run: |
-          aws lambda update-function-configuration \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --environment Variables='{
-              "ENVIRONMENT": "${{ env.ENVIRONMENT }}",
-              "NODE_ENV": "production"
-            }' \
-            --timeout 10 \
-            --memory-size 512
-
-      - name: Warm up Lambda function
-        run: |
-          # Invoke the function to warm it up
-          aws lambda invoke \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --payload '{"httpMethod": "GET", "path": "/"}' \
-            --cli-binary-format raw-in-base64-out \
-            warmup_response.json
-          
-          echo "Warmup response:"
-          cat warmup_response.json
-
-      - name: Update CloudFront distribution (if exists)
-        run: |
-          # Check if CloudFront distribution exists
-          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-            --output text 2>/dev/null || echo "")
-          
-          if [ ! -z "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
-            echo "Creating CloudFront invalidation..."
-            aws cloudfront create-invalidation \
-              --distribution-id $DISTRIBUTION_ID \
-              --paths "/*"
-          fi
-
-      - name: Deploy to S3 (static assets)
-        run: |
-          # Check if S3 bucket exists for static assets
-          BUCKET_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`StaticAssetsBucket`].OutputValue' \
-            --output text 2>/dev/null || echo "")
-          
-          if [ ! -z "$BUCKET_NAME" ] && [ "$BUCKET_NAME" != "None" ]; then
-            echo "Deploying static assets to S3..."
-            cd frontend
-            
-            # Upload static files with cache headers
-            aws s3 sync .next/static s3://$BUCKET_NAME/_next/static \
-              --cache-control "public, max-age=31536000, immutable" \
-              --delete
-            
-            aws s3 sync public s3://$BUCKET_NAME \
-              --cache-control "public, max-age=86400" \
-              --exclude "*.html" \
-              --delete
-          fi
-
-      - name: Run health check
-        run: |
-          # Get the ALB DNS name
-          ALB_DNS=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`ApplicationLoadBalancerDNS`].OutputValue' \
-            --output text)
-          
-          # Wait for ALB to be ready
-          sleep 30
-          
-          # Health check with retry
-          for i in {1..5}; do
-            if curl -f "https://${ALB_DNS}/" -H "Host: ${{ secrets.FRONTEND_URL || 'localhost' }}"; then
-              echo "Frontend health check passed!"
-              break
-            else
-              echo "Health check attempt $i failed, retrying in 10 seconds..."
-              sleep 10
-            fi
-          done
-
-      - name: Test frontend functionality
-        run: |
-          # Test critical pages
-          FRONTEND_URL="${{ secrets.FRONTEND_URL || 'https://yourdomain.com' }}"
-          
-          echo "Testing frontend pages..."
-          curl -f "$FRONTEND_URL/" || echo "Homepage test failed"
-          curl -f "$FRONTEND_URL/login" || echo "Login page test failed"
-          
-          # Test API integration
-          curl -f "$FRONTEND_URL/api/health" || echo "API health check failed"
-
-      - name: Cleanup
-        run: |
-          # Remove temporary files
-          rm -f frontend/deployment-package.zip
-          rm -f frontend/warmup_response.json
-          rm -rf frontend/deployment
-
-      - name: Notify deployment status
-        if: always()
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Frontend deployment successful!"
-            echo "Frontend URL: ${{ secrets.FRONTEND_URL || 'https://yourdomain.com' }}"
-          else
-            echo "❌ Frontend deployment failed!"
-          fi
-
-  post-deploy:
-    needs: build-and-deploy
-    runs-on: ubuntu-latest
-    if: success() && github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update DNS records
-        run: |
-          # Get Route53 hosted zone ID
-          HOSTED_ZONE_ID=$(aws cloudformation describe-stacks \
-            --stack-name ai-stack-platform \
-            --query 'Stacks[0].Outputs[?OutputKey==`HostedZoneId`].OutputValue' \
-            --output text 2>/dev/null || echo "")
-          
-          if [ ! -z "$HOSTED_ZONE_ID" ] && [ "$HOSTED_ZONE_ID" != "None" ]; then
-            echo "DNS records are managed by CloudFormation"
-          else
-            echo "Manual DNS configuration may be required"
-          fi
-
-      - name: Run E2E tests
-        run: |
-          # Install Playwright
-          npm install -g @playwright/test
-          
-          # Run basic E2E tests
-          cat > e2e-test.js << 'EOF'
-          const { test, expect } = require('@playwright/test');
-          
-          test('homepage loads', async ({ page }) => {
-            await page.goto(process.env.FRONTEND_URL || 'https://yourdomain.com');
-            await expect(page).toHaveTitle(/AI Stack/);
-          });
-          
-          test('login page loads', async ({ page }) => {
-            await page.goto((process.env.FRONTEND_URL || 'https://yourdomain.com') + '/login');
-            await expect(page.locator('h1')).toContainText(/Welcome Back|Create Account/);
-          });
-          EOF
-          
-          # Run tests
-          npx playwright test e2e-test.js || echo "E2E tests failed but continuing deployment"
-        env:
-          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-
-      - name: Update monitoring
-        run: |
-          # Update CloudWatch dashboard with new metrics
-          echo "Updating monitoring dashboard..."
-          
-          # Add custom metrics for frontend performance
-          aws logs put-metric-filter \
-            --log-group-name /aws/lambda/ai-stack-platform-frontend \
-            --filter-name "ErrorCount" \
-            --filter-pattern "ERROR" \
-            --metric-transformations \
-              metricName=FrontendErrors,metricNamespace=AiStackPlatform,metricValue=1 \
-            || echo "Metric filter already exists"
-
-      - name: Create GitHub deployment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.repos.createDeployment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: context.sha,
-              environment: 'production',
-              description: 'Frontend deployed to AWS Lambda',
-              auto_merge: false
-            });
-
-      - name: Send Slack notification
-        if: always()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          channel: '#deployments'
-          text: |
-            Frontend deployment to production ${{ job.status }}!
-            Commit: ${{ github.sha }}
-            Author: ${{ github.actor }}
-            URL: ${{ secrets.FRONTEND_URL || 'https://yourdomain.com' }}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+     - name: Send Slack notification
+       if: always()
+       uses: 8398a7/action-slack@v3
+       with:
+         status: ${{ job.status }}
+         channel: '#deployments'
+         text: |
+           Frontend deployment to Vercel ${{ job.status }}!
+           Commit: ${{ github.sha }}
+           Author: ${{ github.actor }}
+       env:
+         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
