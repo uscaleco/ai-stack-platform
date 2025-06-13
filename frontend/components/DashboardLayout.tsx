@@ -8,10 +8,12 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 ml-64 transition-all duration-300">
+      <Sidebar isCollapsed={isCollapsed} toggleCollapse={() => setIsCollapsed((c) => !c)} />
+      <main className={`flex-1 transition-all duration-300 ${isCollapsed ? 'ml-16' : 'ml-64'}`}>
         <div className="p-6">
           {children}
         </div>

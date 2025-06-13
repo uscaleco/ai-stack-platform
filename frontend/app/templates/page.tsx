@@ -14,6 +14,8 @@ interface Template {
   }
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL
+
 export default function Templates() {
   const [templates, setTemplates] = useState<Record<string, Template>>({})
   const [loading, setLoading] = useState(true)
@@ -26,7 +28,7 @@ export default function Templates() {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
 
     // Fetch templates from backend
-    fetch('http://localhost:8000/templates')
+    fetch(`${API_URL}/templates`)
       .then(res => res.json())
       .then(data => {
         setTemplates(data.templates)
@@ -51,7 +53,7 @@ export default function Templates() {
       const { data: { session } } = await supabase.auth.getSession()
       
       // First create subscription
-      const subscriptionResponse = await fetch('http://localhost:8000/create-subscription', {
+      const subscriptionResponse = await fetch(`${API_URL}/create-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,7 +72,7 @@ export default function Templates() {
       const subscriptionData = await subscriptionResponse.json()
 
       // Then deploy
-      const deployResponse = await fetch('http://localhost:8000/deploy', {
+      const deployResponse = await fetch(`${API_URL}/deploy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
