@@ -53,16 +53,18 @@ export default function Templates() {
       const { data: { session } } = await supabase.auth.getSession()
       
       // First create subscription
+      const subscriptionPayload = {
+        plan_type: `${templateId}-${tier}`,
+        payment_method_id: 'pm_card_visa' // Test payment method
+      };
+      console.log('Sending subscription request:', `${API_URL}/create-subscription`, subscriptionPayload);
       const subscriptionResponse = await fetch(`${API_URL}/create-subscription`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session?.access_token}`
         },
-        body: JSON.stringify({
-          plan_type: `${templateId}-${tier}`,
-          payment_method_id: 'pm_card_visa' // Test payment method
-        })
+        body: JSON.stringify(subscriptionPayload)
       })
 
       if (!subscriptionResponse.ok) {
@@ -72,16 +74,18 @@ export default function Templates() {
       const subscriptionData = await subscriptionResponse.json()
 
       // Then deploy
+      const deployPayload = {
+        template_id: `${templateId}-${tier}`,
+        payment_method_id: 'pm_card_visa'
+      };
+      console.log('Sending deploy request:', `${API_URL}/deploy`, deployPayload);
       const deployResponse = await fetch(`${API_URL}/deploy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session?.access_token}`
         },
-        body: JSON.stringify({
-          template_id: `${templateId}-${tier}`,
-          payment_method_id: 'pm_card_visa'
-        })
+        body: JSON.stringify(deployPayload)
       })
 
       if (!deployResponse.ok) {

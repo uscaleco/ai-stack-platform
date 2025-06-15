@@ -269,8 +269,10 @@ async def create_subscription(
         print(user_id)
         print(user_email)
 
-        template = TEMPLATES.get(request.plan_type.split("-")[0])
-        print(template)
+        # Extract template key (everything except the last dash-separated part)
+        template_key = "-".join(request.plan_type.split("-")[:-1])
+        template = TEMPLATES.get(template_key)
+        print(f"Template:{template}")
         if not template:
             raise HTTPException(status_code=400, detail="Invalid template")
 
