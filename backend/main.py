@@ -11,8 +11,10 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from auth import get_current_user, rate_limit
-from config import config, db_client
+from models.models import DeploymentRequest, SubscriptionRequest, DeploymentResponse, UserProfile, HealthResponse
+from core.auth import get_current_user, rate_limit
+from config import config
+from services.postgres import postgres
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -48,39 +50,6 @@ async def add_process_time_header(request, call_next):
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
     return response
-
-
-# Pydantic models
-class DeploymentRequest(BaseModel):
-    template_id: str
-    payment_method_id: str
-
-
-class SubscriptionRequest(BaseModel):
-    plan_type: str
-    payment_method_id: str
-
-
-class DeploymentResponse(BaseModel):
-    deployment_id: str
-    url: str
-    status: str
-    subscription_id: str
-
-
-class UserProfile(BaseModel):
-    user_id: str
-    email: str
-    created_at: Optional[str] = None
-    subscription_count: int = 0
-    deployment_count: int = 0
-
-
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: str
-    version: str
-    environment: str
 
 
 # AI Stack templates
@@ -182,20 +151,21 @@ TEMPLATES = {
 
 
 # Database operations
-async def execute_query(sql: str, parameters: list = None):
-    """Execute SQL query using Aurora Data API or traditional connection"""
-    try:
-        if config.use_aurora_data_api:
-            response = db_client.execute_statement(sql, parameters)
-            return response
-        else:
-            # Fallback to traditional connection for development
-            # This would use asyncpg or similar for local development
-            logger.warning("Using fallback database connection")
-            return {"records": []}
-    except Exception as e:
-        logger.error(f"Database query failed: {str(e)}")
-        raise HTTPException(status_code=500, detail="Database error")
+async def execute_query(sql: str, parameters: list = None, fetch: bool = True):
+    args = []
+    if parameters:
+        for param in parameters:
+            value = param["value"]
+            if "stringValue" in value:
+                args.append(value["stringValue"])
+            elif "booleanValue" in value:
+                args.append(value["booleanValue"])
+            else:
+                args.append(next(iter(value.values())))
+    if fetch:
+        return await postgres.fetch(sql, *args)
+    else:
+        return await postgres.execute(sql, *args)
 
 
 # Public endpoints (no authentication required)
@@ -296,8 +266,11 @@ async def create_subscription(
     try:
         user_id = current_user["user_id"]
         user_email = current_user["email"]
+        print(user_id)
+        print(user_email)
 
         template = TEMPLATES.get(request.plan_type.split("-")[0])
+        print(template)
         if not template:
             raise HTTPException(status_code=400, detail="Invalid template")
 
@@ -672,11 +645,8 @@ async def stripe_webhook(request):
         event = stripe.Webhook.construct_event(
             payload, sig_header, config.stripe_webhook_secret
         )
-
-        # Handle the event
         if event["type"] == "customer.subscription.updated":
             subscription = event["data"]["object"]
-            # Update subscription status in database
             logger.info(f"Subscription updated: {subscription['id']}")
         elif event["type"] == "invoice.payment_failed":
             invoice = event["data"]["object"]
@@ -723,86 +693,86 @@ def generate_docker_compose(template: Dict) -> str:
     """Generate docker-compose.yml content based on template"""
     compose_configs = {
         "ollama-webui": """
-version: '3.8'
-services:
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama:/root/.ollama
-    restart: unless-stopped
-    environment:
-      - OLLAMA_HOST=0.0.0.0
+                version: '3.8'
+                services:
+                ollama:
+                    image: ollama/ollama:latest
+                    ports:
+                    - "11434:11434"
+                    volumes:
+                    - ollama:/root/.ollama
+                    restart: unless-stopped
+                    environment:
+                    - OLLAMA_HOST=0.0.0.0
 
-  webui:
-    image: ghcr.io/open-webui/open-webui:main
-    ports:
-      - "3000:8080"
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-    restart: unless-stopped
-    depends_on:
-      - ollama
+                webui:
+                    image: ghcr.io/open-webui/open-webui:main
+                    ports:
+                    - "3000:8080"
+                    environment:
+                    - OLLAMA_BASE_URL=http://ollama:11434
+                    restart: unless-stopped
+                    depends_on:
+                    - ollama
 
-volumes:
-  ollama:
-""",
-        "rag-app": """
-version: '3.8'
-services:
-  chromadb:
-    image: ghcr.io/chroma-core/chroma:latest
-    ports:
-      - "8000:8000"
-    volumes:
-      - chroma:/chroma/chroma
-    restart: unless-stopped
+                volumes:
+                ollama:
+                """,
+                        "rag-app": """
+                version: '3.8'
+                services:
+                chromadb:
+                    image: ghcr.io/chroma-core/chroma:latest
+                    ports:
+                    - "8000:8000"
+                    volumes:
+                    - chroma:/chroma/chroma
+                    restart: unless-stopped
 
-  rag-app:
-    image: python:3.11-slim
-    ports:
-      - "8501:8501"
-    environment:
-      - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8000
-    restart: unless-stopped
-    depends_on:
-      - chromadb
-    command: >
-      bash -c "pip install streamlit chromadb openai &&
-               echo 'import streamlit as st; st.title(\"RAG Document Chat\")' > app.py &&
-               streamlit run app.py --server.address 0.0.0.0 --server.port 8501"
+                rag-app:
+                    image: python:3.11-slim
+                    ports:
+                    - "8501:8501"
+                    environment:
+                    - CHROMA_HOST=chromadb
+                    - CHROMA_PORT=8000
+                    restart: unless-stopped
+                    depends_on:
+                    - chromadb
+                    command: >
+                    bash -c "pip install streamlit chromadb openai &&
+                            echo 'import streamlit as st; st.title(\"RAG Document Chat\")' > app.py &&
+                            streamlit run app.py --server.address 0.0.0.0 --server.port 8501"
 
-volumes:
-  chroma:
-""",
-        "ai-agent": """
-version: '3.8'
-services:
-  redis:
-    image: redis:alpine
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
+                volumes:
+                chroma:
+                """,
+                        "ai-agent": """
+                version: '3.8'
+                services:
+                redis:
+                    image: redis:alpine
+                    restart: unless-stopped
+                    command: redis-server --appendonly yes
+                    volumes:
+                    - redis_data:/data
 
-  agent:
-    image: python:3.11-slim
-    ports:
-      - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-    restart: unless-stopped
-    depends_on:
-      - redis
-    command: >
-      bash -c "pip install fastapi uvicorn redis &&
-               echo 'from fastapi import FastAPI; app = FastAPI(); @app.get(\"/\"); def read_root(): return {\"message\": \"AI Customer Agent Running\"}' > main.py &&
-               uvicorn main:app --host 0.0.0.0 --port 8000"
+                agent:
+                    image: python:3.11-slim
+                    ports:
+                    - "8000:8000"
+                    environment:
+                    - REDIS_URL=redis://redis:6379
+                    restart: unless-stopped
+                    depends_on:
+                    - redis
+                    command: >
+                    bash -c "pip install fastapi uvicorn redis &&
+                            echo 'from fastapi import FastAPI; app = FastAPI(); @app.get(\"/\"); def read_root(): return {\"message\": \"AI Customer Agent Running\"}' > main.py &&
+                            uvicorn main:app --host 0.0.0.0 --port 8000"
 
-volumes:
-  redis_data:
+                volumes:
+                redis_data:
 """,
     }
 
