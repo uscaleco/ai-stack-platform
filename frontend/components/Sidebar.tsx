@@ -3,8 +3,17 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, Database, FileText, Menu, Layout, User } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { useRouter } from 'next/navigation'
 
 export default function Sidebar({ isCollapsed, toggleCollapse }: { isCollapsed: boolean, toggleCollapse: () => void }) {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
+
   return (
     <div className={`fixed left-0 top-0 h-full bg-gray-900 text-white transition-all duration-300 z-50 ${
       isCollapsed ? 'w-16' : 'w-64'
@@ -43,6 +52,13 @@ export default function Sidebar({ isCollapsed, toggleCollapse }: { isCollapsed: 
           <User size={20} />
           {!isCollapsed && <span className="ml-3">My Profile</span>}
         </Link>
+        <button
+          onClick={handleLogout}
+          className="flex items-center w-full px-4 py-3 hover:bg-gray-700 transition-colors text-left mt-4"
+        >
+          <span className="material-icons">logout</span>
+          {!isCollapsed && <span className="ml-3">Logout</span>}
+        </button>
       </nav>
     </div>
   )
